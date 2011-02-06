@@ -175,15 +175,18 @@ arcFrom u dir | abs uPerpDir < eps = Nothing
         intersectionOffset = sqrt d / (2*a)
         parabolaTop = -b / (2*a)
 
-drawHyper :: Int -> Render ()
-drawHyper sz = do
+setupPNG :: Int -> Render ()
+setupPNG sz = do
     let sc = 1.3
+    scale (fromIntegral sz / (2*sc)) (-fromIntegral sz / (2*sc))
+    translate (sc) (-sc)
+    setLineWidth $ ((2*sc) / fromIntegral sz)
+
+
+drawHyper :: Render ()
+drawHyper = do
     setSourceRGB 1 1 1
     paint
-
-    scale (-fromIntegral sz / (2*sc)) (fromIntegral sz / (2*sc))
-    translate (-sc) (sc)
-    setLineWidth $ ((2*sc) / fromIntegral sz)
 
     setSourceRGB 0 0 0
     setDash [0.1, 0.1] 0.15
@@ -197,8 +200,8 @@ drawHyper sz = do
 
     setDash [] 0
 
-    setSourceRGB 0 0 1
-    mapM (\a -> drawArc a) as
+    mapM (\a -> drawArc (0,0,1) a) as
+    mapM (\b -> drawArc (0,1,0) b) bs
 
     return ()
 
@@ -211,18 +214,6 @@ drawHyper sz = do
     stroke
     -}
   where
-    nextArc alpha len arc = arcFrom (fst n) dir
-      where
-        n = snd $ arcNormals arc
-        dir = (rotateVec alpha (unitVector $ snd n)) <.> len
-    Just a1 = arcFrom (Point2 (0.5,0)) (makeRel2 (0,log 3))
-    Just a2 = nextArc (-pi/2) (log 3) a1
-    Just a3 = nextArc (-pi/2) (log 3) a2
-    Just a4 = nextArc (-pi/2) (log 3) a3
-    Just a5 = nextArc (-pi/2) (log 3) a4
-
-    as = [a1, a2, a3, a4, a5]
-    
     drawPoint x y = do
       setSourceRGB 1 0 0
       moveTo x y
@@ -230,6 +221,9 @@ drawHyper sz = do
       stroke
 
     drawNormals a = do
+      save
+      setSourceRGB 1 0 0
+      setDash [] 0
       let arrlen = 0.07
       let n = fst $ arcNormals a
       let Pair (x0,y0) = iso $ fst n
@@ -241,10 +235,12 @@ drawHyper sz = do
       let Pair (x1,y1) = iso $ (fst n) `plusDir` ((snd n) <.> arrlen)
       moveTo x0 y0
       lineTo x1 y1
+      stroke
+      restore
 
-    drawArc a = do
+    drawArc (r,g,b) a = do
       save
-      setLineWidth (1/(8*72)) 
+      setLineWidth (1/(8*72))   -- FIXME calculate line width based on current scale
       setDash [0.01, 0.01] 0.015
       setSourceRGB 0.5 0.5 0.5
       arc (getX (center a)) (getY (center a)) (radius a) 0 (2*pi)
@@ -252,15 +248,37 @@ drawHyper sz = do
       restore
 
       setDash [] 0
-      setSourceRGB 0 0 1
+      setSourceRGB r g b
       let arcF = if (fixAngle $ toA a - fromA a) > 0 then arc else arcNegative
       arcF (getX (center a)) (getY (center a)) (radius a) (fromA a) (toA a)
       stroke
 
+      --drawNormals a
+
+nextArc alpha len arc = arcFrom (fst n) dir
+  where
+    n = snd $ arcNormals arc
+    dir = (rotateVec alpha (unitVector $ snd n)) <.> len
+
+Just a1 = arcFrom (Point2 (0.5,0)) (makeRel2 (0,log 3))
+Just a2 = nextArc (pi/2) (log 3) a1
+Just a3 = nextArc (pi/2) (log 3) a2
+Just a4 = nextArc (pi/2) (log 3) a3
+Just a5 = nextArc (pi/2) (log 3) a4
+as = [a1, a2] --, a3, a4, a5]
+
+Just b1 = arcFrom (Point2 (0,0.5)) (makeRel2 (log 3,0))
+Just b2 = nextArc (-pi/2) (log 3) b1
+Just b3 = nextArc (-pi/2) (log 3) b2
+Just b4 = nextArc (-pi/2) (log 3) b3
+Just b5 = nextArc (-pi/2) (log 3) b4
+bs = [b1, b2]--, b3, b4, b5]
+
 main = do
   let sz = 600
+  mapM_ (printf "%f\n" . (subtract $ log 3) . arcLength) as
   withImageSurface FormatRGB24 sz sz $ \s -> do
-    renderWith s $ drawHyper sz
+    renderWith s $ (setupPNG sz >> drawHyper)
     surfaceWriteToPNG s "hyper.png"
 
   {-
