@@ -30,6 +30,22 @@ v </> s = (/s) `fmapNum1` v
 infixl 6 <+>, <->
 infixl 7 <.>, </>
 
+-- expm1 x = e^x - 1, accurate for small x
+expm1 x | u == 1    = x
+        | um1 == -1 = -1
+        | otherwise = um1*x/(log u)
+  where
+    u = exp x
+    um1 = u - 1
+-- coshm1 x = cosh(x) - 1, accurate for small x
+-- cosh(x) = (e^x + e^(-x))/2-1 =
+--         = (e^x - 2 + e^(-x))/2 =
+--         = (e^(2x) - 2e^x + 1)/(2e^x) =
+--         = (e^x - 1)^2 / (2e^x) =
+--         = expm1(x)^2 / (2*(expm1(x)+1))
+coshm1 :: Double -> Double
+coshm1 x = let exm1 = expm1 x in exm1^2 / (2*(exm1+1))
+
 dirVec :: Double -> Vector
 dirVec a = makeRel2 (cos a, sin a)
 
@@ -43,7 +59,7 @@ hyperDist u v = acosh (1 + delta u v)
   where
     delta u v = 2 * (magSq $ u <-> v) / ((1 - magSq u)*(1 - magSq v))
 
-arcLength arc = hyperDist (fst $ fst normals) (fst $ snd normals) 
+arcLength arc = hyperDist (fst $ fst normals) (fst $ snd normals)
   where
     normals = arcNormals arc
 
@@ -77,15 +93,16 @@ arcNormals arc = ((p1,v1), (p2, v2))
   where
     p1 = (center arc) `plusDir` ((dirVec $ fromA arc) <.> (radius arc))
     p2 = (center arc) `plusDir` ((dirVec $ toA arc) <.> (radius arc))
-    v1 = negate $ perpendicular2 $ dirVec $ fromA arc
-    v2 =     id $ perpendicular2 $ dirVec $ toA arc
+    v1 = (perpendicular2 $ dirVec $ fromA arc) <.> signum a
+    v2 = (perpendicular2 $ dirVec $ toA arc) <.> signum a
+    a = fixAngle (toA arc - fromA arc)
 
 arcFrom :: Point -> Vector -> Maybe Arc
 arcFrom u dir | abs uPerpDir < eps = Nothing
               | otherwise = do beta <- return $ toAngle cosSinBeta
                                return $ A { center = c, radius = r, fromA = alpha, toA = beta }
   where
-    eps = 1e-6
+    eps = 1e-9
     -- center of the arc circle is defined by the following equations:
     -- 2 (u.perpDir) x0 = u1 (u.perpDir) + u2 (u.dir) - d2 =       u . ( u.perpDir, u.dir ) - d2
     -- 2 (u.perpDir) y0 = u2 (u.perpDir) - u1 (u.dir) + d1 = - perpU . ( u.perpDir, u.dir ) + d1
@@ -102,7 +119,7 @@ arcFrom u dir | abs uPerpDir < eps = Nothing
 
     -- various intermediate values used to compute the circle center/arc angles
     bigD, bigU, bigR, bigX, bigY :: Double
-    bigD = (cosh (mag dir) - 1) / 2
+    bigD = coshm1 (mag dir) / 2
     bigU = bigD * (1 - magSq u)
     bigR = let r2 = r^2 in bigU * (1 - magSq c - r2) / (2*r2) - 1
     Pair (bigX, bigY) = iso $ c <.> (bigU/r) <-> (unitVector $ u <-> c)
@@ -110,7 +127,7 @@ arcFrom u dir | abs uPerpDir < eps = Nothing
     bigXSq = bigX^2
     bigYSq = bigY^2
     bigRSq = bigR^2
-    
+
     -- sin and cos of the angle of the end-point of the arc, with the circle center as a reference point
     -- may contain illegal values (outside of [-1,1] range)
     cosBetaSolutions, sinBetaSolutions :: [Double]
@@ -124,7 +141,7 @@ arcFrom u dir | abs uPerpDir < eps = Nothing
             | otherwise   = concatMap (\sinBeta -> let v = sqrt (1 - sinBeta^2) in [v, -v]) s1
         s2  | bigYSq > 0  = map (\cosBeta -> (bigR - bigX*cosBeta)/bigY) c2
             | otherwise   = concatMap (\cosBeta -> let v = sqrt (1 - cosBeta^2) in [v, -v]) c2
-                        
+
     -- same as {sin,cos}BetaSolutions, but the illegal pairs of values have been filtered out
     cosSinBetaValid :: [Vector]
     cosSinBetaValid = filter validCosSinPair $ map makeRel2 $ zip cosBetaSolutions sinBetaSolutions
