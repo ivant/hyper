@@ -15,7 +15,6 @@ import Text.Printf
 import Debug.Trace
 
 type Point = Point2' Double
-data Segment = S { p1 :: Point, p2 :: Point } deriving Show
 data Arc = A { center :: Point, radius :: Double, fromA :: Double, toA :: Double } deriving Show
 
 type Vector = Rel2' Double
@@ -48,11 +47,9 @@ arcLength arc = hyperDist (fst $ fst normals) (fst $ snd normals)
   where
     normals = arcNormals arc
 
-segmentToArc :: Segment -> Arc
-segmentToArc s = A { center = iso c, radius = r, fromA = a1fxd, toA = a2fxd }
+segmentToArc :: Point -> Point -> Arc
+segmentToArc u v = A { center = iso c, radius = r, fromA = a1fxd, toA = a2fxd }
   where
-    u = iso $ p1 s
-    v = iso $ p2 s
     q = v `dotProduct` (perpendicular2 u)
     c = ((perpendicular2 u) <.> (magSq v + 1) - (perpendicular2 v) <.> (magSq u + 1)) </> (1/(2*q))
     r = u `distFrom` c
