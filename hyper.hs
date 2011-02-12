@@ -66,11 +66,12 @@ arcLength arc = hyperDist (fst $ fst normals) (fst $ snd normals)
 segmentToArc :: Point -> Point -> Arc
 segmentToArc u v = A { center = iso c, radius = r, fromA = a1fxd, toA = a2fxd }
   where
-    q = v `dotProduct` (perpendicular2 u)
-    c = ((perpendicular2 u) <.> (magSq v + 1) - (perpendicular2 v) <.> (magSq u + 1)) </> (1/(2*q))
+    q = (iso v) `dotProduct` (perpendicular2 (iso u))
+    c :: Point
+    c = iso $ ((perpendicular2 (iso u)) <.> (magSq v + 1) - (perpendicular2 (iso v)) <.> (magSq u + 1)) </> (1/(2*q))
     r = u `distFrom` c
-    a1 = toAngle $ u - c
-    a2 = toAngle $ v - c
+    a1 = toAngle $ u `fromPt` c
+    a2 = toAngle $ v `fromPt` c
     da = a2-a1
     (a1fxd, a2fxd) =
       if da < 0 then
@@ -201,7 +202,7 @@ drawHyper = do
     setDash [] 0
 
     mapM (\a -> drawArc (0,0,1) a) as
-    mapM (\b -> drawArc (0,1,0) b) bs
+--    mapM (\b -> drawArc (0,1,0) b) bs
 
     return ()
 
@@ -255,28 +256,40 @@ drawHyper = do
 
       --drawNormals a
 
+arcAngles :: Arc -> Arc -> Double
+arcAngles a1 a2 = 180 * (acos $ (unitVector a2n) `dotProduct` (unitVector a1n)) / pi
+  where
+    a1n = snd $ snd $ arcNormals a1
+    a2n = snd $ fst $ arcNormals a2
+
 nextArc alpha len arc = arcFrom (fst n) dir
   where
     n = snd $ arcNormals arc
     dir = (rotateVec alpha (unitVector $ snd n)) <.> len
 
-Just a1 = arcFrom (Point2 (0.5,0)) (makeRel2 (0,log 3))
-Just a2 = nextArc (pi/2) (log 3) a1
-Just a3 = nextArc (pi/2) (log 3) a2
-Just a4 = nextArc (pi/2) (log 3) a3
-Just a5 = nextArc (pi/2) (log 3) a4
-as = [a1, a2] --, a3, a4, a5]
+beta = pi/2
+len = 1.06
+Just a1 = arcFrom (Point2 (0.5,0)) (makeRel2 (0,len))
+Just a2 = nextArc beta len a1
+Just a3 = nextArc beta len a2
+Just a4 = nextArc beta len a3
+Just a5 = nextArc beta len a4
+as = [a1, a2, a3, a4, a5]
 
-Just b1 = arcFrom (Point2 (0,0.5)) (makeRel2 (log 3,0))
-Just b2 = nextArc (-pi/2) (log 3) b1
-Just b3 = nextArc (-pi/2) (log 3) b2
-Just b4 = nextArc (-pi/2) (log 3) b3
-Just b5 = nextArc (-pi/2) (log 3) b4
-bs = [b1, b2]--, b3, b4, b5]
+Just b1 = arcFrom (Point2 (0,0.5)) (makeRel2 (len,0))
+Just b2 = nextArc (-beta) len b1
+Just b3 = nextArc (-beta) len b2
+Just b4 = nextArc (-beta) len b3
+Just b5 = nextArc (-beta) len b4
+bs = [b1, b2, b3, b4, b5]
 
 main = do
   let sz = 600
-  mapM_ (printf "%f\n" . (subtract $ log 3) . arcLength) as
+  mapM_ (printf "%f\n" . (subtract $ len) . arcLength) as
+  printf "a12: %f\n" $ arcAngles a1 a2
+  printf "a23: %f\n" $ arcAngles a2 a3
+  printf "a34: %f\n" $ arcAngles a3 a4
+  printf "a45: %f\n" $ arcAngles a4 a5
   withImageSurface FormatRGB24 sz sz $ \s -> do
     renderWith s $ (setupPNG sz >> drawHyper)
     surfaceWriteToPNG s "hyper.png"
