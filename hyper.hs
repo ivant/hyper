@@ -11,6 +11,7 @@ import Data.SG.Geometry.TwoDim
 import Data.SG.Vector
 import Data.SG.Vector.Basic
 import Text.Printf
+import Data.Maybe (fromJust)
 
 import Debug.Trace
 
@@ -63,16 +64,24 @@ arcLength arc = hyperDist (fst $ fst normals) (fst $ snd normals)
   where
     normals = arcNormals arc
 
+arcFromPt, arcToPt :: Arc -> Point
+arcFromPt arc = (center arc) `plusDir` ((dirVec $ fromA arc) <.> (radius arc))
+arcToPt   arc = (center arc) `plusDir` ((dirVec $ toA arc) <.> (radius arc))
+
 segmentToArc :: Point -> Point -> Arc
 segmentToArc u v = A { center = iso c, radius = r, fromA = a1fxd, toA = a2fxd }
   where
     q = (iso v) `dotProduct` (perpendicular2 (iso u))
     c :: Point
-    c = iso $ ((perpendicular2 (iso u)) <.> (magSq v + 1) - (perpendicular2 (iso v)) <.> (magSq u + 1)) </> (1/(2*q))
+    c = iso $ ((perpendicular2 (iso u)) <.> (magSq v + 1) - (perpendicular2 (iso v)) <.> (magSq u + 1)) </> (2*q)
     r = u `distFrom` c
-    a1 = toAngle $ u `fromPt` c
-    a2 = toAngle $ v `fromPt` c
+    a1 = fixAngle $ toAngle $ u `fromPt` c
+    a2 = fixAngle $ toAngle $ v `fromPt` c
     da = a2-a1
+    (a1fxd, a2fxd)  | da < -pi  = (a1, a2 + 2*pi)
+                    | da > pi   = (a1 + 2*pi, a2)
+                    | otherwise = (a1, a2)
+    {- RSI: remove
     (a1fxd, a2fxd) =
       if da < 0 then
           if da < -pi then
@@ -84,6 +93,7 @@ segmentToArc u v = A { center = iso c, radius = r, fromA = a1fxd, toA = a2fxd }
               (a2, a1+2*pi)
             else
               (a1, a2)
+    -}
 
 fixAngle a  | a < -pi   = fixAngle (a+2*pi)
             | a > pi    = fixAngle (a-2*pi)
@@ -92,16 +102,16 @@ fixAngle a  | a < -pi   = fixAngle (a+2*pi)
 arcNormals :: Arc -> ((Point, Vector), (Point, Vector))
 arcNormals arc = ((p1,v1), (p2, v2))
   where
-    p1 = (center arc) `plusDir` ((dirVec $ fromA arc) <.> (radius arc))
-    p2 = (center arc) `plusDir` ((dirVec $ toA arc) <.> (radius arc))
+    p1 = arcFromPt arc
+    p2 = arcToPt arc
     v1 = (perpendicular2 $ dirVec $ fromA arc) <.> signum a
     v2 = (perpendicular2 $ dirVec $ toA arc) <.> signum a
     a = fixAngle (toA arc - fromA arc)
 
 arcFrom :: Point -> Vector -> Maybe Arc
 arcFrom u dir | abs uPerpDir < eps = Nothing
-              | otherwise = do beta <- return $ toAngle cosSinBeta
-                               return $ A { center = c, radius = r, fromA = alpha, toA = beta }
+              | otherwise = do ngonAngle <- return $ toAngle cosSinBeta
+                               return $ A { center = c, radius = r, fromA = alpha, toA = ngonAngle }
   where
     eps = 1e-9
     -- center of the arc circle is defined by the following equations:
@@ -148,14 +158,14 @@ arcFrom u dir | abs uPerpDir < eps = Nothing
     cosSinBetaValid = filter validCosSinPair $ map makeRel2 $ zip cosBetaSolutions sinBetaSolutions
       where
         validCosSinPair :: Vector -> Bool
-        validCosSinPair betaV = abs (magSq betaV - 1) < eps && magSq (c `plusDir` (betaV <.> r)) <= 1
+        validCosSinPair ngonAngleV = abs (magSq ngonAngleV - 1) < eps && magSq (c `plusDir` (ngonAngleV <.> r)) <= 1
 
 
     -- end-point direction (from the arc circle center)
     cosSinBetas :: [Vector]
-    cosSinBetas = filter (\betaV -> ((vdir betaV) `dotProduct` dir) >= 0) cosSinBetaValid
+    cosSinBetas = filter (\ngonAngleV -> ((vdir ngonAngleV) `dotProduct` dir) >= 0) cosSinBetaValid
       where
-        vdir betaV = (c `plusDir` (betaV <.> r)) `fromPt` u
+        vdir ngonAngleV = (c `plusDir` (ngonAngleV <.> r)) `fromPt` u
 
     vs :: [Point]
     vs = map ((c `plusDir`) . (<.> r)) cosSinBetas
@@ -183,6 +193,29 @@ setupPNG sz = do
     translate (sc) (-sc)
     setLineWidth $ ((2*sc) / fromIntegral sz)
 
+reflectPtThrough :: Point -> Arc -> Point
+reflectPtThrough pt mirror = arcToPt imageArc
+  where
+    (mirrorPt, mirrorNormal) = fst $ arcNormals mirror
+    preimageArc = segmentToArc pt mirrorPt
+    preimageArcNormal = negate $ snd $ snd $ arcNormals preimageArc
+    reflectedNormal = preimageArcNormal `reflectVectorAgainst` mirrorNormal
+    --imageArc = fromJust $ arcFrom mirrorPt (reflectedNormal <.> (arcLength preimageArc)) -- FIXME: fromJust
+    imageArc | arcLength preimageArc > 0 = fromJust $ arcFrom mirrorPt (reflectedNormal <.> (arcLength preimageArc)) -- FIXME: fromJust
+             | otherwise = preimageArc
+
+reflectThrough :: Arc -> Arc -> Arc
+reflectThrough preimage mirror = segmentToArc reflectedFrom reflectedTo
+  where
+    reflectedFrom = (arcFromPt preimage) `reflectPtThrough` mirror
+    reflectedTo = (arcToPt preimage) `reflectPtThrough` mirror
+
+reflectVectorAgainst :: Vector -> Vector -> Vector
+reflectVectorAgainst a b = c <.> 2 - au
+  where
+    au = unitVector a
+    bu = unitVector b
+    c = b <.> (au `dotProduct` bu)
 
 drawHyper :: Render ()
 drawHyper = do
@@ -202,7 +235,15 @@ drawHyper = do
     setDash [] 0
 
     mapM (\a -> drawArc (0,0,1) a) as
---    mapM (\b -> drawArc (0,1,0) b) bs
+    let bs = [ a `reflectThrough` m | m <- as, a <- as ]
+    mapM (\b -> drawArc (0,0.5,0.7) b) bs
+
+    {-
+    drawArc (0.7,0.0,0.7) preimageArc
+    drawStraight (0.7,0.0,0.7) mirrorPt (mirrorPt `plusDir` preimageArcNormal)
+    drawStraight (0.7,0.0,0.7) mirrorPt (mirrorPt `plusDir` reflectedNormal)
+    drawStraight (0.7,0.5,0.7) mirrorPt (mirrorPt `plusDir` mirrorNormal)
+    -}
 
     return ()
 
@@ -215,6 +256,25 @@ drawHyper = do
     stroke
     -}
   where
+    -- RSI
+    (mirrorPt, mirrorNormal) = fst $ arcNormals a1
+    preimageArc = segmentToArc (arcToPt a5) mirrorPt
+    preimageArcNormal = negate $ snd $ snd $ arcNormals preimageArc
+    reflectedNormal = preimageArcNormal `reflectVectorAgainst` mirrorNormal
+    imageArc | arcLength preimageArc > 0 = fromJust $ arcFrom mirrorPt (reflectedNormal <.> (arcLength preimageArc)) -- FIXME: fromJust
+             | otherwise = preimageArc
+
+    drawStraight (r,g,b) pt1 pt2 =
+      let Pair (x0,y0) = iso pt1
+          Pair (x1,y1) = iso pt2
+        in do
+          save
+          setSourceRGB r g b
+          moveTo x0 y0
+          lineTo x1 y1
+          stroke
+          restore
+
     drawPoint x y = do
       setSourceRGB 1 0 0
       moveTo x y
@@ -267,21 +327,21 @@ nextArc alpha len arc = arcFrom (fst n) dir
     n = snd $ arcNormals arc
     dir = (rotateVec alpha (unitVector $ snd n)) <.> len
 
-beta = pi/2
-len = 1.06
-Just a1 = arcFrom (Point2 (0.5,0)) (makeRel2 (0,len))
-Just a2 = nextArc beta len a1
-Just a3 = nextArc beta len a2
-Just a4 = nextArc beta len a3
-Just a5 = nextArc beta len a4
+ngonAngle = pi/2
+ngonSides = 5
+beta = 2*pi/ngonSides
+len = acosh (1+2*(cos beta))
+startP = Point2 (r, 0)
+  where
+    r = let t = tan (beta/2) in sqrt ((1-t)/(1+t))
+
+Just a1 = arcFrom startP (dirVec (ngonAngle/2+pi/2) <.> len)
+Just a2 = nextArc ngonAngle len a1
+Just a3 = nextArc ngonAngle len a2
+Just a4 = nextArc ngonAngle len a3
+Just a5 = nextArc ngonAngle len a4
 as = [a1, a2, a3, a4, a5]
 
-Just b1 = arcFrom (Point2 (0,0.5)) (makeRel2 (len,0))
-Just b2 = nextArc (-beta) len b1
-Just b3 = nextArc (-beta) len b2
-Just b4 = nextArc (-beta) len b3
-Just b5 = nextArc (-beta) len b4
-bs = [b1, b2, b3, b4, b5]
 
 main = do
   let sz = 600
@@ -290,15 +350,9 @@ main = do
   printf "a23: %f\n" $ arcAngles a2 a3
   printf "a34: %f\n" $ arcAngles a3 a4
   printf "a45: %f\n" $ arcAngles a4 a5
+  printf "d(a5,startP) = %f\n" $ (fst$snd$arcNormals a5) `hyperDist` startP
   withImageSurface FormatRGB24 sz sz $ \s -> do
     renderWith s $ (setupPNG sz >> drawHyper)
     surfaceWriteToPNG s "hyper.png"
-
-  {-
-  let scale = 2.5
-  withPDFSurface "hyper.pdf" (72*8) (72*8) $ \s -> do
-    pdfSurfaceSetSize s 1 1
-    renderWith s $ drawHyper (1/2) 1
-  -}
 
   return ()
