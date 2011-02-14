@@ -7,21 +7,30 @@ module Hyperbolic (
   reflectThrough
 ) where
 
-import Math (coshm1, squareEqSolutions)
-import Geometry (Point, Vector, fixAngle, (<.>), (</>), reflectVectorAgainst)
+import Data.Ratio ((%))
+import Math (coshm1, squareEqSolutions, infinity, nan)
+import Geometry (Point, Vector, fixAngle, (<.>), (</>), reflectVectorAgainst, dirVec)
 import Primitives (Arc(..), arcNormals, arcFromPt, arcToPt)
-import Data.SG (toAngle, mag, magSq, iso, fromPt, dotProduct, perpendicular2, distFrom, plusDir, minusDir, makeRel2, Point2'(..), unitVector, Pair(..))
+import Data.SG (toAngle, mag, magSq, iso, fromPt, dotProduct, perpendicular2, distFrom, plusDir, minusDir, makeRel2, Point2'(..), unitVector, Pair(..), origin)
 import Data.Ord (comparing)
 import Data.List (find, minimumBy)
 import Data.Maybe (fromJust)
+
+import Test.QuickCheck
 
 import Debug.Trace
 
 
 hyperDist :: Point -> Point -> Double
-hyperDist u v = acosh (1 + delta u v)
+hyperDist u v | u2m1 > eps || v2m1 > eps = nan
+              | q < eps   = infinity
+              | otherwise = acosh (1 + delta u v)
   where
-    delta u v = 2 * (magSq $ u `fromPt` v) / ((1 - magSq u)*(1 - magSq v))
+    eps = 1e-9
+    u2m1 = magSq u - 1
+    v2m1 = magSq v - 1
+    q = u2m1*v2m1
+    delta u v = 2 * (magSq $ u `fromPt` v) / q
 
 arcLength :: Arc -> Double
 arcLength arc = hyperDist (fst $ fst normals) (fst $ snd normals)
@@ -133,4 +142,46 @@ reflectThrough preimage mirror = makeHyperArc reflectedFrom reflectedTo
   where
     reflectedFrom = (arcFromPt preimage) `reflectPtThrough` mirror
     reflectedTo = (arcToPt preimage) `reflectPtThrough` mirror
+
+
+----- Tests -----
+
+arbFractional :: Fractional a => a -> a -> Gen a
+arbFractional from to = sized $ \n -> do
+    let maxN = ((toInteger n) * precision) `max` 1
+    a <- choose (0, maxN)
+    return $ fromRational (a % maxN) * (to-from)+from
+  where precision = 9999999999999 :: Integer
+
+arbAngle :: Floating a => Gen a
+arbAngle = do
+    m <- fmap fromIntegral $ choose (1, q)
+    a <- fmap (*m) $ arbFractional 0 (twopi/(fromIntegral q))
+    elements [-a, a]
+  where
+    q = 8*3*5 :: Int
+    twopi = 2*pi
+
+arbVector :: Double -> Double -> Gen Vector
+arbVector minL maxL = do
+    r <- arbFractional minL maxL
+    a <- arbAngle
+    return $ dirVec a <.> r
+
+arbPoint :: Double -> Double -> Gen Point
+arbPoint minL maxL = fmap (origin `plusDir`) $ arbVector minL maxL
+
+arbHyperPoint :: Gen Point
+arbHyperPoint = arbPoint 0 1
+    
+propHyperDistInf = forAll (do
+    u <- arbHyperPoint
+    v <- arbPoint 1 1
+    elements [(u,v),(v,u)]) $ \ (u,v) -> isInfinite $ hyperDist u v 
+
+propHyperDistNaN = forAll (do
+    u <- arbHyperPoint
+    v <- arbPoint 1.1 10
+    elements [(u,v),(v,u)]) $ \ (u,v) -> isNaN $ hyperDist u v 
+
 

@@ -1,8 +1,16 @@
 module Math (
   expm1,
   coshm1,
-  squareEqSolutions
+  squareEqSolutions,
+  infinity,
+  nan
 ) where
+
+infinity :: (RealFloat a, Read a) => a
+infinity = read "Infinity"
+
+nan :: (RealFloat a, Read a) => a
+nan = read "NaN"
 
 -- expm1 x = e^x - 1, accurate for small x
 expm1 x | u == 1    = x
