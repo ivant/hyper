@@ -181,6 +181,7 @@ arcFrom u dir | abs uPerpDir < eps = Nothing
                               | d > 0  = [parabolaTop + intersectionOffset, parabolaTop - intersectionOffset]
                               | d == 0 = [parabolaTop]
                               | d < 0  = []
+                              | otherwise = error $ "d is NaN in a square equation"
       where
         d = b^2 - 4*a*c
         intersectionOffset = sqrt d / (2*a)
@@ -200,7 +201,6 @@ reflectPtThrough pt mirror = arcToPt imageArc
     preimageArc = segmentToArc pt mirrorPt
     preimageArcNormal = negate $ snd $ snd $ arcNormals preimageArc
     reflectedNormal = preimageArcNormal `reflectVectorAgainst` mirrorNormal
-    --imageArc = fromJust $ arcFrom mirrorPt (reflectedNormal <.> (arcLength preimageArc)) -- FIXME: fromJust
     imageArc | arcLength preimageArc > 0 = fromJust $ arcFrom mirrorPt (reflectedNormal <.> (arcLength preimageArc)) -- FIXME: fromJust
              | otherwise = preimageArc
 
@@ -234,31 +234,27 @@ drawHyper = do
 
     setDash [] 0
 
-    mapM (\a -> drawArc (0,0,1) a) as
-    let bs = [ a `reflectThrough` m | m <- as, a <- as ]
-    mapM (\b -> drawArc (0,0.5,0.7) b) bs
-
+    mapM_ (\a -> drawArc (0,0,1) a) ngon
     {-
-    drawArc (0.7,0.0,0.7) preimageArc
-    drawStraight (0.7,0.0,0.7) mirrorPt (mirrorPt `plusDir` preimageArcNormal)
-    drawStraight (0.7,0.0,0.7) mirrorPt (mirrorPt `plusDir` reflectedNormal)
-    drawStraight (0.7,0.5,0.7) mirrorPt (mirrorPt `plusDir` mirrorNormal)
+    let bs = [ a `reflectThrough` m | a <- ngon, m <- ngon ]
+    mapM (\b -> drawArc (0,0.5,0.7) b) bs
     -}
+    mapM_ (\a -> drawArc (0,0.5,0.7) a) $ map (`reflectThrough` mirror) [arcToMirror]
+
+    drawPoint (1,0,0) pt
+    drawArc (0.7,0,0.5) mirror
+--    drawArc (0.7,0.5,0) preimageArc
+--    drawArc (0.7,0.5,0) imageArc
 
     return ()
 
-    {-
-    setSourceRGB 1 0 0
-    drawNormals a
-    stroke
-    setSourceRGB 1 0 1
-    drawNormals a2
-    stroke
-    -}
   where
-    -- RSI
-    (mirrorPt, mirrorNormal) = fst $ arcNormals a1
-    preimageArc = segmentToArc (arcToPt a5) mirrorPt
+    arcToMirror = ngon !! 0
+    mirror = ngon !! 1
+    pt = arcToPt arcToMirror
+
+    (mirrorPt, mirrorNormal) = fst $ arcNormals mirror
+    preimageArc = segmentToArc pt mirrorPt
     preimageArcNormal = negate $ snd $ snd $ arcNormals preimageArc
     reflectedNormal = preimageArcNormal `reflectVectorAgainst` mirrorNormal
     imageArc | arcLength preimageArc > 0 = fromJust $ arcFrom mirrorPt (reflectedNormal <.> (arcLength preimageArc)) -- FIXME: fromJust
@@ -275,11 +271,14 @@ drawHyper = do
           stroke
           restore
 
-    drawPoint x y = do
+    drawPoint (r,g,b) pt = do
+      save
+      let Pair (x,y) = iso pt
       setSourceRGB 1 0 0
       moveTo x y
       arc x y 0.01 0 (2*pi)
       stroke
+      restore
 
     drawNormals a = do
       save
@@ -299,7 +298,7 @@ drawHyper = do
       stroke
       restore
 
-    drawArc (r,g,b) a = do
+    drawArcConstruction a = do
       save
       setLineWidth (1/(8*72))   -- FIXME calculate line width based on current scale
       setDash [0.01, 0.01] 0.015
@@ -308,11 +307,16 @@ drawHyper = do
       stroke
       restore
 
+    drawArc (r,g,b) a = do
+      --drawArcConstruction a
+
+      save
       setDash [] 0
       setSourceRGB r g b
       let arcF = if (fixAngle $ toA a - fromA a) > 0 then arc else arcNegative
       arcF (getX (center a)) (getY (center a)) (radius a) (fromA a) (toA a)
       stroke
+      restore
 
       --drawNormals a
 
@@ -328,29 +332,36 @@ nextArc alpha len arc = arcFrom (fst n) dir
     dir = (rotateVec alpha (unitVector $ snd n)) <.> len
 
 ngonAngle = pi/2
-ngonSides = 5
-beta = 2*pi/ngonSides
+ngonSides = 7 :: Int
+beta = 2*pi/(fromIntegral ngonSides)
 len = acosh (1+2*(cos beta))
-startP = Point2 (r, 0)
+
+ngon = take ngonSides $ iterate (fromJust . nextArc ngonAngle len) firstArc
   where
+    firstArc = fromJust $ arcFrom startP (dirVec (ngonAngle/2+pi/2) <.> len)
+    startP = Point2 (r, 0)
     r = let t = tan (beta/2) in sqrt ((1-t)/(1+t))
 
+{-
 Just a1 = arcFrom startP (dirVec (ngonAngle/2+pi/2) <.> len)
 Just a2 = nextArc ngonAngle len a1
 Just a3 = nextArc ngonAngle len a2
 Just a4 = nextArc ngonAngle len a3
 Just a5 = nextArc ngonAngle len a4
 as = [a1, a2, a3, a4, a5]
+-}
 
 
 main = do
   let sz = 600
+  {-
   mapM_ (printf "%f\n" . (subtract $ len) . arcLength) as
   printf "a12: %f\n" $ arcAngles a1 a2
   printf "a23: %f\n" $ arcAngles a2 a3
   printf "a34: %f\n" $ arcAngles a3 a4
   printf "a45: %f\n" $ arcAngles a4 a5
   printf "d(a5,startP) = %f\n" $ (fst$snd$arcNormals a5) `hyperDist` startP
+  -}
   withImageSurface FormatRGB24 sz sz $ \s -> do
     renderWith s $ (setupPNG sz >> drawHyper)
     surfaceWriteToPNG s "hyper.png"
