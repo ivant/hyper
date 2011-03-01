@@ -1,8 +1,8 @@
 module Main where
 
 import Geometry ((<.>), fixAngle, dirVec, Point, rotateVec)
-import Primitives (arcNormals, center, radius, isArc, toA, fromA, linePt1, linePt2, Arc)
-import Hyperbolic (reflectThrough, arcFrom)
+import Primitives (arcNormals, center, radius, isArc, toA, fromA, linePt1, linePt2, Arc(..), arcFromPt, arcToPt)
+import Hyperbolic (reflectThrough, arcFrom, reflectPtThrough)
 
 import Data.SG (plusDir, Pair(..), iso, getX, getY, Point2'(..), unitVector)
 import Graphics.Rendering.Cairo (Render, lineTo, moveTo, stroke, save, restore, setSourceRGB, setDash, arc, arcNegative, scale, translate, setLineWidth, paint, withImageSurface, Format(..), renderWith, surfaceWriteToPNG)
@@ -35,7 +35,10 @@ drawHyper = do
     setDash [] 0
 
     mapM_ (\a -> drawArc (0,0,1) a) ngon
-    let bs = [ a `reflectThrough` m | a <- ngon, m <- ngon ]
+    let bs = do m <- ngon
+                a <- ngon
+                return $ a `reflectThrough` m
+
     mapM (\b -> drawArc (0,0.5,0.7) b) bs
     
     return ()
@@ -101,7 +104,7 @@ drawHyper = do
                           --drawNormals a
                       | otherwise = drawStraight (r,g,b) (linePt1 a) (linePt2 a)
 
-ngon = makeNgon 7 (pi/2) (\r -> Point2 (r, 0)) (pi/4+pi/2)
+ngon = makeNgon 5 (pi/2) (\r -> Point2 (r, 0)) (pi/4+pi/2)
 
 makeNgon :: Int -> Double -> (Double -> Point) -> Double -> [Arc]
 makeNgon ngonSides ngonAngle startPF startAngle = take ngonSides $ iterate (fromJust . nextArc ngonAngle len) firstArc

@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell, Rank2Types #-}
 module Hyperbolic (
   hyperDist,
   arcLength,
@@ -17,6 +18,7 @@ import Data.List (find, minimumBy)
 import Data.Maybe (fromJust)
 
 import Test.QuickCheck
+import Test.QuickCheck.All (forAllProperties)
 
 import Debug.Trace
 
@@ -33,14 +35,13 @@ hyperDist u v | u2m1 > eps || v2m1 > eps = nan
     delta u v = 2 * (magSq $ u `fromPt` v) / q
 
 arcLength :: Arc -> Double
-arcLength arc = hyperDist (fst $ fst normals) (fst $ snd normals)
-  where
-    normals = arcNormals arc
+arcLength arc = hyperDist (arcFromPt arc) (arcToPt arc)
 
 makeHyperArc :: Point -> Point -> Arc
-makeHyperArc u v  | q == 0 = L { linePt1 = u, linePt2 = v }
-                  | otherwise = A { center = iso c, radius = r, fromA = a1fxd, toA = a2fxd }
+makeHyperArc u v  | abs q < eps = L { linePt1 = u, linePt2 = v }
+                  | otherwise   = A { center = iso c, radius = r, fromA = a1fxd, toA = a2fxd }
   where
+    eps = 1e-9
     q = (iso v) `dotProduct` (perpendicular2 (iso u)) :: Double
     c :: Point
     c = iso $ ((perpendicular2 (iso u)) <.> (magSq v + 1) - (perpendicular2 (iso v)) <.> (magSq u + 1)) </> (2*q)
@@ -58,11 +59,13 @@ arcFrom u dir | abs uPerpDir < eps = Just $ L { linePt1 = u, linePt2 = lineEndPt
                                return $ A { center = c, radius = r, fromA = alpha, toA = ngonAngle }
   where
     eps = 1e-9
-    lineCoefSolutions = squareEqSolutions ((bigU+1)*(magSq dir), -2*(mag u)*(mag dir), u2-bigU)
-    lineEndPtSolutions = map (\k -> dir <.> k) $ filter (>=0) lineCoefSolutions
+    -- v = u*k
+    -- k^2 (1+bigU) - 2k + 1 - bigU / u2 == 0
+    lineCoefSolutions = squareEqSolutions ((bigU+1), -2, 1-bigU/u2)
+    lineEndPtSolutions = map (u <.>) lineCoefSolutions :: [Point]
     lineEndPt :: Point
     lineEndPt | null lineEndPtSolutions = u
-              | otherwise = iso $ head lineEndPtSolutions
+              | otherwise = head $ filter (\v -> (v `fromPt` u) `dotProduct` dir > 0) lineEndPtSolutions
     
     -- center of the arc circle is defined by the following equations:
     -- 2 (u.perpDir) x0 = u1 (u.perpDir) + u2 (u.dir) - d2 =       u . ( u.perpDir, u.dir ) - d2
@@ -125,12 +128,15 @@ arcFrom u dir | abs uPerpDir < eps = Just $ L { linePt1 = u, linePt2 = lineEndPt
     cosSinBeta = snd $ minimumBy (comparing ((hyperDist u).fst)) $ zip vs cosSinBetas
 
 
-    tr x = trace (show x) x
+tr x = trace (show x) x
 
 reflectPtThrough :: Point -> Arc -> Point
 reflectPtThrough pt mirror = arcToPt imageArc
   where
-    (mirrorPt, mirrorNormal) = fst $ arcNormals mirror
+    c = center mirror
+    negMirrorDir = unitVector $ pt `fromPt` c
+    mirrorPt = c `plusDir` (negMirrorDir <.> (radius mirror))
+    mirrorNormal = perpendicular2 negMirrorDir
     preimageArc = makeHyperArc pt mirrorPt
     preimageArcNormal = negate $ snd $ snd $ arcNormals preimageArc
     reflectedNormal = preimageArcNormal `reflectVectorAgainst` mirrorNormal
@@ -171,17 +177,48 @@ arbVector minL maxL = do
 arbPoint :: Double -> Double -> Gen Point
 arbPoint minL maxL = fmap (origin `plusDir`) $ arbVector minL maxL
 
-arbHyperPoint :: Gen Point
+arbHyperPoint, arbFiniteHyperPoint :: Gen Point
 arbHyperPoint = arbPoint 0 1
+
+arbFiniteHyperPoint = arbHyperPoint `suchThat` (\p -> magSq p < 1)
     
-propHyperDistInf = forAll (do
+arbHyperArc, arbFiniteHyperArc :: Gen Arc
+arbHyperArc = sized $ \n -> do
+    c <- arbPoint 1 (fromIntegral $ n+1 `max` 10) `suchThat` (\p -> magSq p - 1 > eps)
+    let r2 = magSq c - 1
+    let r = sqrt r2
+    -- now we need to find the range of valid angles of the arc
+    let a = (r2 - 1 + magSq c) / (2 * mag c)
+        alpha = acos $ a / r
+        zeroDirAngle = toAngle $ origin `fromPt` c
+        minAngle = zeroDirAngle - alpha
+        maxAngle = zeroDirAngle + alpha
+    fromAngle <- arbFractional minAngle maxAngle
+    toAngle <- arbFractional minAngle maxAngle
+    return $ A { center = c, radius = r, fromA = fromAngle, toA = toAngle }
+  where
+    eps = 1e-6
+
+arbFiniteHyperArc = arbHyperArc `suchThat` (\a -> magSq (arcFromPt a) < 1 && magSq (arcToPt a) < 1)
+
+
+prop_HyperDistInf = forAll (do
     u <- arbHyperPoint
     v <- arbPoint 1 1
-    elements [(u,v),(v,u)]) $ \ (u,v) -> isInfinite $ hyperDist u v 
+    elements [(u,v),(v,u)]) $ \(u,v) -> isInfinite $ hyperDist u v 
 
-propHyperDistNaN = forAll (do
+prop_HyperDistNaN = forAll (sized $ \n -> do
     u <- arbHyperPoint
-    v <- arbPoint 1.1 10
-    elements [(u,v),(v,u)]) $ \ (u,v) -> isNaN $ hyperDist u v 
+    v <- arbPoint 1 (fromIntegral n `max` 10) `suchThat` (\p -> magSq p - 1 > eps)
+    elements [(u,v),(v,u)]) $ \(u,v) -> isNaN $ hyperDist u v 
+  where
+    eps = 1e-6
 
+prop_ptDoubleReflect = forAll (do
+    mirror <- arbHyperArc
+    p <- arbFiniteHyperPoint
+    return (mirror, p)) $ \(mirror, p) -> hyperDist p ((p `reflectPtThrough` mirror) `reflectPtThrough` mirror) < eps
+  where
+    eps = 1e-6
 
+allTests = $(forAllProperties) quickCheckResult
