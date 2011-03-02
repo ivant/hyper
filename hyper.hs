@@ -9,6 +9,7 @@ import Graphics.Rendering.Cairo (Render, lineTo, moveTo, stroke, save, restore, 
 import Text.Printf (printf)
 import Data.Maybe (fromJust)
 
+type Ngon = [Arc]
 
 setupPNG :: Int -> Render ()
 setupPNG sz = do
@@ -16,6 +17,9 @@ setupPNG sz = do
     scale (fromIntegral sz / (2*sc)) (-fromIntegral sz / (2*sc))
     translate (sc) (-sc)
     setLineWidth $ ((2*sc) / fromIntegral sz)
+
+reflectNgonThrough :: Ngon -> Arc -> Ngon
+reflectNgonThrough p a = map (`reflectThrough` a) p
 
 drawHyper :: Render ()
 drawHyper = do
@@ -34,16 +38,17 @@ drawHyper = do
 
     setDash [] 0
 
-    mapM_ (\a -> drawArc (0,0,1) a) ngon
-    let bs = do m <- ngon
-                a <- ngon
-                return $ a `reflectThrough` m
+    drawNgon (0,0,1) ngon
+    let ngons = do m <- ngon
+                   return $ ngon `reflectNgonThrough` m
 
-    mapM (\b -> drawArc (0,0.5,0.7) b) bs
+    mapM_ (drawNgon (0,0.5,0.7)) ngons
     
     return ()
 
   where
+    drawNgon c p = mapM_ (drawArc c) p
+
     drawStraight (r,g,b) pt1 pt2 =
       let Pair (x0,y0) = iso pt1
           Pair (x1,y1) = iso pt2
