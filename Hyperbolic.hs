@@ -214,10 +214,21 @@ prop_HyperDistNaN = forAll (sized $ \n -> do
   where
     eps = 1e-6
 
+-- Failing:
+-- - A {center = Point2 (-0.38701796244697073,46.772774248781474), radius = 46.763684562176365, fromA = -1.5595117191119663, toA = -1.5457892887965283}
+--   Point2 (5.3359510955077634e-2,0.1893282277516213)
+-- - A {center = Point2 (-7.026560251697408e-3,11.42896537535343), radius = 11.385134998039177, fromA = -1.6042656287329964, toA = -1.5008069125600594}
+--   Point2 (2.6284348017659494e-3,-3.328187301160707e-3)
+-- - A {center = Point2 (9.005954122824345,-1.674365647430688e-2), radius = 8.950278767303784, fromA = 3.1375978573775174, toA = 3.2429671227072405}
+--   Point2 (0.26218718409077446,8.660415731694505e-3))
+-- - A {center = Point2 (-1.5213160721601204,4.758137009633355), radius = 4.894310001813876, fromA = -1.3809081404953094, toA = -1.264400643335706}
+--   Point4 (-7.157618553445397e-2,-0.838403729165129)
 prop_ptDoubleReflect = forAll (do
     mirror <- arbHyperArc
     p <- arbFiniteHyperPoint
-    return (mirror, p)) $ \(mirror, p) -> hyperDist p ((p `reflectPtThrough` mirror) `reflectPtThrough` mirror) < eps
+    return (mirror, p)) $ \(mirror, p) ->
+      let reflect = (`reflectPtThrough` mirror)
+        in hyperDist p (reflect $ reflect p) < eps
   where
     eps = 1e-6
 
