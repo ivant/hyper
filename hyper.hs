@@ -109,7 +109,7 @@ drawHyper = do
                           --drawNormals a
                       | otherwise = drawStraight (r,g,b) (linePt1 a) (linePt2 a)
 
-ngon = makeNgon 5 (pi/2) (\r -> Point2 (r, 0)) (pi/4+pi/2)
+ngon = makeNgon 5 (pi/2) (\r -> Point2 (0, 0)) (pi/4+pi/2)
 
 makeNgon :: Int -> Double -> (Double -> Point) -> Double -> [Arc]
 makeNgon ngonSides ngonAngle startPF startAngle = take ngonSides $ iterate (fromJust . nextArc ngonAngle len) firstArc

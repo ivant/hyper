@@ -11,8 +11,8 @@ module Hyperbolic (
 import Data.Ratio ((%))
 import Math (coshm1, squareEqSolutions, infinity, nan)
 import Geometry (Point, Vector, fixAngle, (<.>), (</>), reflectVectorAgainst, dirVec)
-import Primitives (Arc(..), arcNormals, arcFromPt, arcToPt)
-import Data.SG (toAngle, mag, magSq, iso, fromPt, dotProduct, perpendicular2, distFrom, plusDir, minusDir, makeRel2, Point2'(..), unitVector, Pair(..), origin)
+import Primitives (Arc(..), arcNormals, arcFromPt, arcToPt, isArc)
+import Data.SG (toAngle, mag, magSq, iso, fromPt, dotProduct, perpendicular2, distFrom, plusDir, minusDir, makeRel2, Point2'(..), unitVector, Pair(..), origin, nearestPointOnLine, makeLine)
 import Data.Ord (comparing)
 import Data.List (find, minimumBy)
 import Data.Maybe (fromJust)
@@ -59,13 +59,15 @@ arcFrom u dir | abs uPerpDir < eps = Just $ L { linePt1 = u, linePt2 = lineEndPt
                                return $ A { center = c, radius = r, fromA = alpha, toA = ngonAngle }
   where
     eps = 1e-9
-    -- v = u*k
-    -- k^2 (1+bigU) - 2k + 1 - bigU / u2 == 0
-    lineCoefSolutions = squareEqSolutions ((bigU+1), -2, 1-bigU/u2)
-    lineEndPtSolutions = map (u <.>) lineCoefSolutions :: [Point]
     lineEndPt :: Point
-    lineEndPt | null lineEndPtSolutions = u
+    lineEndPt | u2 < eps = (iso $ unitVector dir) <.> sqrt (bigD/(bigD+1))
+              | null lineEndPtSolutions = u
               | otherwise = head $ filter (\v -> (v `fromPt` u) `dotProduct` dir > 0) lineEndPtSolutions
+      where
+        -- v = u*k
+        -- k^2 (1+bigU) - 2k + 1 - bigU / u2 == 0
+        lineCoefSolutions = squareEqSolutions ((bigU+1), -2, 1-bigU/u2)
+        lineEndPtSolutions = map (u <.>) lineCoefSolutions :: [Point]
     
     -- center of the arc circle is defined by the following equations:
     -- 2 (u.perpDir) x0 = u1 (u.perpDir) + u2 (u.dir) - d2 =       u . ( u.perpDir, u.dir ) - d2
@@ -112,7 +114,7 @@ arcFrom u dir | abs uPerpDir < eps = Just $ L { linePt1 = u, linePt2 = lineEndPt
     cosSinBetaValid = filter validCosSinPair $ map makeRel2 $ zip cosBetaSolutions sinBetaSolutions
       where
         validCosSinPair :: Vector -> Bool
-        validCosSinPair ngonAngleV = abs (magSq ngonAngleV - 1) < eps && magSq (c `plusDir` (ngonAngleV <.> r)) <= 1
+        validCosSinPair ngonAngleV = magSq (c `plusDir` (ngonAngleV <.> r)) <= 1
 
 
     -- end-point direction (from the arc circle center)
@@ -133,10 +135,14 @@ tr x = trace (show x) x
 reflectPtThrough :: Point -> Arc -> Point
 reflectPtThrough pt mirror = arcToPt imageArc
   where
-    c = center mirror
-    negMirrorDir = unitVector $ pt `fromPt` c
-    mirrorPt = c `plusDir` (negMirrorDir <.> (radius mirror))
-    mirrorNormal = perpendicular2 negMirrorDir
+    (mirrorPt, mirrorNormal) | isArc mirror = (c `plusDir` (negMirrorDir <.> (radius mirror)), perpendicular2 negMirrorDir)
+                             | otherwise    = (pt `nearestPointOnLine` mirrorLine, mirrorLineDir)
+      where
+        mirrorLineDir = linePt2 mirror `fromPt` linePt1 mirror
+        mirrorLine = makeLine (linePt1 mirror) mirrorLineDir 
+        c = center mirror
+        negMirrorDir = unitVector $ pt `fromPt` c
+
     preimageArc = makeHyperArc pt mirrorPt
     preimageArcNormal = negate $ snd $ snd $ arcNormals preimageArc
     reflectedNormal = preimageArcNormal `reflectVectorAgainst` mirrorNormal
@@ -214,15 +220,20 @@ prop_HyperDistNaN = forAll (sized $ \n -> do
   where
     eps = 1e-6
 
--- Failing:
--- - A {center = Point2 (-0.38701796244697073,46.772774248781474), radius = 46.763684562176365, fromA = -1.5595117191119663, toA = -1.5457892887965283}
---   Point2 (5.3359510955077634e-2,0.1893282277516213)
--- - A {center = Point2 (-7.026560251697408e-3,11.42896537535343), radius = 11.385134998039177, fromA = -1.6042656287329964, toA = -1.5008069125600594}
---   Point2 (2.6284348017659494e-3,-3.328187301160707e-3)
--- - A {center = Point2 (9.005954122824345,-1.674365647430688e-2), radius = 8.950278767303784, fromA = 3.1375978573775174, toA = 3.2429671227072405}
---   Point2 (0.26218718409077446,8.660415731694505e-3))
--- - A {center = Point2 (-1.5213160721601204,4.758137009633355), radius = 4.894310001813876, fromA = -1.3809081404953094, toA = -1.264400643335706}
---   Point4 (-7.157618553445397e-2,-0.838403729165129)
+{- Failing:
+hyperDist p ((p `reflectPtThrough` a) `reflectPtThrough` a) < 1e-6
+let a = A {center = Point2 (-7.026560251697408e-3,11.42896537535343), radius = 11.385134998039177, fromA = -1.6042656287329964, toA = -1.5008069125600594}
+let p = Point2 (2.6284348017659494e-3,-3.328187301160707e-3)
+1e-4
+
+let a = A {center = Point2 (9.005954122824345,-1.674365647430688e-2), radius = 8.950278767303784, fromA = 3.1375978573775174, toA = 3.2429671227072405}
+let p = Point2 (0.26218718409077446,8.660415731694505e-3)
+1.04e-6
+
+let a = A {center = Point2 (-1.5213160721601204,4.758137009633355), radius = 4.894310001813876, fromA = -1.3809081404953094, toA = -1.264400643335706}
+let p = Point2 (-7.157618553445397e-2,-0.838403729165129)
+6.9e-5
+-}
 prop_ptDoubleReflect = forAll (do
     mirror <- arbHyperArc
     p <- arbFiniteHyperPoint
